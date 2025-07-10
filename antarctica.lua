@@ -27,6 +27,7 @@ local DamageConnections = {}
 local LastHealth = nil
 local FallStartHeight = nil
 local HealthLocked = false
+local IsHealing = false
 
 -- Create ScreenGui
 local ScreenGui = Instance.new("ScreenGui")
@@ -165,7 +166,7 @@ ProtectionTabButton.Name = "ProtectionTabButton"
 ProtectionTabButton.Size = UDim2.new(0.5, -5, 1, 0)
 ProtectionTabButton.Position = UDim2.new(0.5, 5, 0, 0)
 ProtectionTabButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
-ProtectionTabButton.Text = "🛡️ Protection"
+ProtectionTabButton.Text = "🛡️ Protection+"
 ProtectionTabButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 ProtectionTabButton.TextScaled = true
 ProtectionTabButton.Font = Enum.Font.SourceSansBold
@@ -447,7 +448,7 @@ ProtectionTitle.Name = "ProtectionTitle"
 ProtectionTitle.Size = UDim2.new(1, 0, 0, 30)
 ProtectionTitle.Position = UDim2.new(0, 0, 0, 0)
 ProtectionTitle.BackgroundTransparency = 1
-ProtectionTitle.Text = "🛡️ Protection Features"
+ProtectionTitle.Text = "🛡️ Protection & Healing"
 ProtectionTitle.TextColor3 = Color3.fromRGB(255, 100, 100)
 ProtectionTitle.TextScaled = true
 ProtectionTitle.Font = Enum.Font.SourceSansBold
@@ -539,7 +540,7 @@ AntiWaterIcon.Name = "AntiWaterIcon"
 AntiWaterIcon.Size = UDim2.new(0, 60, 0, 60)
 AntiWaterIcon.Position = UDim2.new(0, 10, 0.5, -30)
 AntiWaterIcon.BackgroundTransparency = 1
-AntiWaterIcon.Text = "💧"
+AntiWaterIcon.Text = "💙"
 AntiWaterIcon.TextScaled = true
 AntiWaterIcon.Font = Enum.Font.SourceSansBold
 AntiWaterIcon.Parent = AntiWaterFrame
@@ -550,7 +551,7 @@ AntiWaterText.Name = "AntiWaterText"
 AntiWaterText.Size = UDim2.new(1, -170, 0, 25)
 AntiWaterText.Position = UDim2.new(0, 80, 0, 15)
 AntiWaterText.BackgroundTransparency = 1
-AntiWaterText.Text = "Anti Water Damage"
+AntiWaterText.Text = "Water Healing"
 AntiWaterText.TextColor3 = Color3.fromRGB(255, 255, 255)
 AntiWaterText.TextScaled = true
 AntiWaterText.TextXAlignment = Enum.TextXAlignment.Left
@@ -563,7 +564,7 @@ AntiWaterDesc.Name = "AntiWaterDesc"
 AntiWaterDesc.Size = UDim2.new(1, -170, 0, 20)
 AntiWaterDesc.Position = UDim2.new(0, 80, 0, 45)
 AntiWaterDesc.BackgroundTransparency = 1
-AntiWaterDesc.Text = "Prevents drowning damage"
+AntiWaterDesc.Text = "Prevents drowning + Heals in water"
 AntiWaterDesc.TextColor3 = Color3.fromRGB(150, 150, 150)
 AntiWaterDesc.TextScaled = true
 AntiWaterDesc.TextXAlignment = Enum.TextXAlignment.Left
@@ -857,6 +858,9 @@ local function ToggleAntiWaterDamage()
         if DamageConnections.WaterHealthChanged then
             DamageConnections.WaterHealthChanged:Disconnect()
         end
+        if DamageConnections.WaterRegen then
+            DamageConnections.WaterRegen:Disconnect()
+        end
         
         -- Store health
         LastHealth = Humanoid.Health
@@ -868,40 +872,29 @@ local function ToggleAntiWaterDamage()
             -- If swimming and health decreased
             if state == Enum.HumanoidStateType.Swimming and health < LastHealth then
                 -- Instantly restore
-                Humanoid.Health = LastHealth
+                Humanoid.Health = maxHealth
             elseif health > LastHealth then
                 LastHealth = health
             end
         end)
         
-        -- Layer 2: Continuous water protection with enhanced detection
+        -- Layer 2: Continuous water protection with health regeneration
         DamageConnections.WaterDamage = RunService.Heartbeat:Connect(function()
             if Humanoid and Humanoid.Health > 0 then
                 local state = Humanoid:GetState()
+                local isInWater = false
                 
-                -- Force max health while swimming
-                if state == Enum.HumanoidStateType.Swimming or
-                   state == Enum.HumanoidStateType.PlatformStanding then
-                    -- Lock health at maximum
-                    if Humanoid.Health ~= maxHealth then
-                        Humanoid.Health = maxHealth
-                    end
-                    LastHealth = maxHealth
+                -- Check if swimming
+                if state == Enum.HumanoidStateType.Swimming then
+                    isInWater = true
                 end
                 
-                -- Additional protection for any health loss
+                -- Enhanced water detection
                 if Character:FindFirstChild("HumanoidRootPart") and Character:FindFirstChild("Head") then
                     local rootPart = Character.HumanoidRootPart
                     local head = Character.Head
                     
-                    -- Check if head is underwater (drowning protection)
-                    local headRay = workspace:Raycast(
-                        head.Position,
-                        Vector3.new(0, 2, 0),
-                        RaycastParams.new()
-                    )
-                    
-                    -- Enhanced water detection
+                    -- Check terrain for water
                     local region = Region3.new(
                         rootPart.Position - Vector3.new(4, 4, 4),
                         rootPart.Position + Vector3.new(4, 4, 4)
@@ -910,7 +903,6 @@ local function ToggleAntiWaterDamage()
                     
                     local terrain = workspace.Terrain
                     local materials, sizes = terrain:ReadVoxels(region, 4)
-                    local isInWater = false
                     
                     for x = 1, materials.Size.X do
                         for y = 1, materials.Size.Y do
@@ -924,33 +916,112 @@ local function ToggleAntiWaterDamage()
                         end
                         if isInWater then break end
                     end
-                    
-                    -- If in water or health dropping, restore immediately
-                    if (isInWater or state == Enum.HumanoidStateType.Swimming) and Humanoid.Health < maxHealth then
+                end
+                
+                -- If in water, heal to max health
+                if isInWater then
+                    if Humanoid.Health < maxHealth then
+                        -- Instant heal to max
                         Humanoid.Health = maxHealth
                     end
+                    LastHealth = maxHealth
                 end
             end
         end)
         
-        -- Extra layer: Prevent any health changes while swimming
-        task.spawn(function()
+        -- Layer 3: Health regeneration while in water
+        DamageConnections.WaterRegen = task.spawn(function()
             while AntiWaterDamage do
-                if Humanoid:GetState() == Enum.HumanoidStateType.Swimming then
-                    Humanoid.Health = Humanoid.MaxHealth
+                if Humanoid and Humanoid.Health > 0 then
+                    local state = Humanoid:GetState()
+                    local wasHealing = IsHealing
+                    IsHealing = false
+                    
+                    -- Check if in water
+                    if state == Enum.HumanoidStateType.Swimming or
+                       state == Enum.HumanoidStateType.PlatformStanding or
+                       (Character:FindFirstChild("HumanoidRootPart") and 
+                        Character.HumanoidRootPart.Position.Y < 0) then
+                        
+                        -- Additional check for water parts
+                        local inWaterPart = false
+                        if Character:FindFirstChild("HumanoidRootPart") then
+                            local touchingParts = workspace:GetPartBoundsInBox(
+                                Character.HumanoidRootPart.CFrame,
+                                Character.HumanoidRootPart.Size * 1.5
+                            )
+                            for _, part in pairs(touchingParts) do
+                                if part.Name:lower():find("water") or 
+                                   (part:IsA("BasePart") and part.Material == Enum.Material.Water) then
+                                    inWaterPart = true
+                                    break
+                                end
+                            end
+                        end
+                        
+                        -- Regenerate health if any water condition is met
+                        if state == Enum.HumanoidStateType.Swimming or inWaterPart then
+                            if Humanoid.Health < Humanoid.MaxHealth then
+                                -- Add 10% of max health per tick (fast regen)
+                                local healAmount = Humanoid.MaxHealth * 0.1
+                                Humanoid.Health = math.min(Humanoid.Health + healAmount, Humanoid.MaxHealth)
+                                IsHealing = true
+                            end
+                        end
+                    end
+                    
+                    -- Update visual indicator
+                    if IsHealing and not wasHealing then
+                        -- Start healing effect with pulse animation
+                        AntiWaterToggle.BackgroundColor3 = Color3.fromRGB(50, 255, 50)
+                        AntiWaterToggle.Text = "HEALING"
+                        
+                        -- Pulse effect
+                        task.spawn(function()
+                            while IsHealing and AntiWaterDamage do
+                                TweenService:Create(AntiWaterToggle, TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+                                    BackgroundColor3 = Color3.fromRGB(100, 255, 100)
+                                }):Play()
+                                task.wait(0.5)
+                                if IsHealing and AntiWaterDamage then
+                                    TweenService:Create(AntiWaterToggle, TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+                                        BackgroundColor3 = Color3.fromRGB(50, 255, 50)
+                                    }):Play()
+                                end
+                                task.wait(0.5)
+                            end
+                        end)
+                    elseif not IsHealing and wasHealing then
+                        -- Stop healing effect
+                        AntiWaterToggle.BackgroundColor3 = Color3.fromRGB(100, 170, 255)
+                        AntiWaterToggle.Text = "ON"
+                    end
                 end
-                task.wait(0.1)
+                task.wait(0.2) -- Regen every 0.2 seconds
             end
         end)
+        
+        -- Show regen notification
+        game.StarterGui:SetCore("SendNotification", {
+            Title = "Water Protection Active",
+            Text = "Health will regenerate while in water!",
+            Duration = 3
+        })
+        
     else
         AntiWaterToggle.Text = "OFF"
         AntiWaterToggle.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+        IsHealing = false
         
         -- Disconnect water damage connections
         for key, connection in pairs(DamageConnections) do
             if key:find("Water") then
                 if connection then
-                    connection:Disconnect()
+                    if type(connection) == "thread" then
+                        task.cancel(connection)
+                    else
+                        connection:Disconnect()
+                    end
                     DamageConnections[key] = nil
                 end
             end
@@ -1152,6 +1223,6 @@ ApplyJumpPower()
 -- Notification
 game.StarterGui:SetCore("SendNotification", {
     Title = "Enhanced Game Controller",
-    Text = "Loaded! Press X or Hide UI to minimize. Tab system: Speed/Jump & Protection features.",
+    Text = "Loaded! X = Hide UI | Water = Heal | Tab system for Speed & Protection",
     Duration = 5
 })
