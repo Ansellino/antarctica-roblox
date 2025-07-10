@@ -26,7 +26,6 @@ local AntiWaterDamage = false
 local DamageConnections = {}
 local LastHealth = nil
 local FallStartHeight = nil
-local HealthLocked = false
 
 -- Create ScreenGui
 local ScreenGui = Instance.new("ScreenGui")
@@ -720,7 +719,7 @@ local function ApplyJumpPower()
     end
 end
 
--- Improved Anti-Damage Functions with Better Protection
+-- Improved Anti-Damage Functions
 local function ToggleAntiFallDamage()
     AntiFallDamage = not AntiFallDamage
     
@@ -735,110 +734,57 @@ local function ToggleAntiFallDamage()
         if DamageConnections.StateChanged then
             DamageConnections.StateChanged:Disconnect()
         end
-        if DamageConnections.HealthChanged then
-            DamageConnections.HealthChanged:Disconnect()
-        end
         
-        -- Store max health
-        local maxHealth = Humanoid.MaxHealth
+        -- Store initial health
         LastHealth = Humanoid.Health
         
-        -- Multiple protection layers for fall damage
-        
-        -- Layer 1: State monitoring
+        -- Monitor state changes for fall detection
         DamageConnections.StateChanged = Humanoid.StateChanged:Connect(function(old, new)
-            -- Record when entering freefall
-            if new == Enum.HumanoidStateType.Freefall then
-                LastHealth = Humanoid.Health -- Store health before fall
+            -- When entering freefall, record height
+            if new == Enum.HumanoidStateType.Freefall and Character:FindFirstChild("HumanoidRootPart") then
+                FallStartHeight = Character.HumanoidRootPart.Position.Y
             end
             
-            -- Prevent damage when landing
-            if old == Enum.HumanoidStateType.Freefall and 
-               (new == Enum.HumanoidStateType.Landed or 
-                new == Enum.HumanoidStateType.Running or 
-                new == Enum.HumanoidStateType.RunningNoPhysics) then
-                -- Immediately restore health
-                task.wait() -- Small delay to catch damage
-                Humanoid.Health = LastHealth
-            end
-        end)
-        
-        -- Layer 2: Direct health monitoring
-        DamageConnections.HealthChanged = Humanoid.HealthChanged:Connect(function(health)
-            local state = Humanoid:GetState()
-            -- If health decreased during fall-related states
-            if health < LastHealth and 
-               (state == Enum.HumanoidStateType.Freefall or 
-                state == Enum.HumanoidStateType.Landed or
-                state == Enum.HumanoidStateType.Flying) then
-                -- Instantly restore health
-                Humanoid.Health = LastHealth
-            elseif health > LastHealth then
-                -- Update if health increased (healing)
-                LastHealth = health
-            end
-        end)
-        
-        -- Layer 3: Continuous protection with health lock
-        DamageConnections.FallDamage = RunService.Heartbeat:Connect(function()
-            if Humanoid and Humanoid.Health > 0 then
-                local state = Humanoid:GetState()
-                
-                -- Lock health at max during dangerous states
-                if state == Enum.HumanoidStateType.Freefall or 
-                   state == Enum.HumanoidStateType.Landed or
-                   state == Enum.HumanoidStateType.Flying then
-                    -- Force health to stay at saved value
-                    if Humanoid.Health ~= LastHealth then
-                        Humanoid.Health = LastHealth
-                    end
-                end
-                
-                -- Extra protection: Check velocity for high-speed impacts
-                if Character:FindFirstChild("HumanoidRootPart") then
-                    local velocity = Character.HumanoidRootPart.Velocity
-                    -- If falling fast or just hit ground
-                    if velocity.Y < -50 or (math.abs(velocity.Y) < 5 and state == Enum.HumanoidStateType.Landed) then
-                        if Humanoid.Health < LastHealth then
-                            Humanoid.Health = LastHealth
-                        end
-                    end
-                end
-                
-                -- Ultimate protection: Override any health changes during protection
-                if HealthLocked and Humanoid.Health ~= LastHealth then
+            -- When landing, prevent damage
+            if old == Enum.HumanoidStateType.Freefall and new == Enum.HumanoidStateType.Landed then
+                -- Force health to stay at previous value
+                if Humanoid.Health < LastHealth then
                     Humanoid.Health = LastHealth
                 end
             end
         end)
         
-        -- Enable health lock during dangerous moments
-        task.spawn(function()
-            while AntiFallDamage do
-                local state = Humanoid:GetState()
-                if state == Enum.HumanoidStateType.Freefall then
-                    HealthLocked = true
-                    task.wait(2) -- Keep locked for 2 seconds after freefall
-                    HealthLocked = false
+        -- Continuous health monitoring
+        DamageConnections.FallDamage = RunService.Heartbeat:Connect(function()
+            if Humanoid and Humanoid.Health > 0 then
+                -- If health decreased and we're in a fall-related state
+                if Humanoid.Health < LastHealth then
+                    local state = Humanoid:GetState()
+                    if state == Enum.HumanoidStateType.Freefall or 
+                       state == Enum.HumanoidStateType.Landed or
+                       state == Enum.HumanoidStateType.Flying then
+                        Humanoid.Health = LastHealth
+                    else
+                        -- Update last health if damage wasn't from falling
+                        LastHealth = Humanoid.Health
+                    end
+                else
+                    LastHealth = Humanoid.Health
                 end
-                task.wait(0.1)
             end
         end)
     else
         AntiFallToggle.Text = "OFF"
         AntiFallToggle.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
         
-        -- Reset health lock
-        HealthLocked = false
-        
         -- Disconnect all fall damage connections
-        for key, connection in pairs(DamageConnections) do
-            if key:find("Fall") or key == "StateChanged" or key == "HealthChanged" then
-                if connection then
-                    connection:Disconnect()
-                    DamageConnections[key] = nil
-                end
-            end
+        if DamageConnections.FallDamage then
+            DamageConnections.FallDamage:Disconnect()
+            DamageConnections.FallDamage = nil
+        end
+        if DamageConnections.StateChanged then
+            DamageConnections.StateChanged:Disconnect()
+            DamageConnections.StateChanged = nil
         end
     end
 end
@@ -854,106 +800,38 @@ local function ToggleAntiWaterDamage()
         if DamageConnections.WaterDamage then
             DamageConnections.WaterDamage:Disconnect()
         end
-        if DamageConnections.WaterHealthChanged then
-            DamageConnections.WaterHealthChanged:Disconnect()
-        end
         
-        -- Store health
+        -- Store initial health
         LastHealth = Humanoid.Health
-        local maxHealth = Humanoid.MaxHealth
         
-        -- Layer 1: Direct health monitoring for water
-        DamageConnections.WaterHealthChanged = Humanoid.HealthChanged:Connect(function(health)
-            local state = Humanoid:GetState()
-            -- If swimming and health decreased
-            if state == Enum.HumanoidStateType.Swimming and health < LastHealth then
-                -- Instantly restore
-                Humanoid.Health = LastHealth
-            elseif health > LastHealth then
-                LastHealth = health
-            end
-        end)
-        
-        -- Layer 2: Continuous water protection with enhanced detection
+        -- Monitor for water damage
         DamageConnections.WaterDamage = RunService.Heartbeat:Connect(function()
             if Humanoid and Humanoid.Health > 0 then
                 local state = Humanoid:GetState()
                 
-                -- Force max health while swimming
-                if state == Enum.HumanoidStateType.Swimming or
-                   state == Enum.HumanoidStateType.PlatformStanding then
-                    -- Lock health at maximum
-                    if Humanoid.Health ~= maxHealth then
-                        Humanoid.Health = maxHealth
+                -- Check if in water-related states
+                if state == Enum.HumanoidStateType.Swimming then
+                    -- If health decreased while swimming, restore it
+                    if Humanoid.Health < LastHealth then
+                        Humanoid.Health = LastHealth
                     end
-                    LastHealth = maxHealth
+                elseif Humanoid.Health > LastHealth then
+                    -- Update last health if it increased
+                    LastHealth = Humanoid.Health
+                elseif Humanoid.Health < LastHealth and state ~= Enum.HumanoidStateType.Swimming then
+                    -- Update last health if damage wasn't from water
+                    LastHealth = Humanoid.Health
                 end
-                
-                -- Additional protection for any health loss
-                if Character:FindFirstChild("HumanoidRootPart") and Character:FindFirstChild("Head") then
-                    local rootPart = Character.HumanoidRootPart
-                    local head = Character.Head
-                    
-                    -- Check if head is underwater (drowning protection)
-                    local headRay = workspace:Raycast(
-                        head.Position,
-                        Vector3.new(0, 2, 0),
-                        RaycastParams.new()
-                    )
-                    
-                    -- Enhanced water detection
-                    local region = Region3.new(
-                        rootPart.Position - Vector3.new(4, 4, 4),
-                        rootPart.Position + Vector3.new(4, 4, 4)
-                    )
-                    region = region:ExpandToGrid(4)
-                    
-                    local terrain = workspace.Terrain
-                    local materials, sizes = terrain:ReadVoxels(region, 4)
-                    local isInWater = false
-                    
-                    for x = 1, materials.Size.X do
-                        for y = 1, materials.Size.Y do
-                            for z = 1, materials.Size.Z do
-                                if materials[x][y][z] == Enum.Material.Water then
-                                    isInWater = true
-                                    break
-                                end
-                            end
-                            if isInWater then break end
-                        end
-                        if isInWater then break end
-                    end
-                    
-                    -- If in water or health dropping, restore immediately
-                    if (isInWater or state == Enum.HumanoidStateType.Swimming) and Humanoid.Health < maxHealth then
-                        Humanoid.Health = maxHealth
-                    end
-                end
-            end
-        end)
-        
-        -- Extra layer: Prevent any health changes while swimming
-        task.spawn(function()
-            while AntiWaterDamage do
-                if Humanoid:GetState() == Enum.HumanoidStateType.Swimming then
-                    Humanoid.Health = Humanoid.MaxHealth
-                end
-                task.wait(0.1)
             end
         end)
     else
         AntiWaterToggle.Text = "OFF"
         AntiWaterToggle.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
         
-        -- Disconnect water damage connections
-        for key, connection in pairs(DamageConnections) do
-            if key:find("Water") then
-                if connection then
-                    connection:Disconnect()
-                    DamageConnections[key] = nil
-                end
-            end
+        -- Disconnect water damage protection
+        if DamageConnections.WaterDamage then
+            DamageConnections.WaterDamage:Disconnect()
+            DamageConnections.WaterDamage = nil
         end
     end
 end
@@ -1075,7 +953,7 @@ end)
 -- Button connections
 SpeedTabButton.MouseButton1Click:Connect(function() SwitchTab("Speed") end)
 ProtectionTabButton.MouseButton1Click:Connect(function() SwitchTab("Protection") end)
-CloseButton.MouseButton1Click:Connect(HideUI) -- Changed to hide UI instead of toggle
+CloseButton.MouseButton1Click:Connect(function() ToggleUI() end)
 HideUIButton.MouseButton1Click:Connect(HideUI)
 ShowButton.MouseButton1Click:Connect(ShowUI)
 ToggleJumpButton.MouseButton1Click:Connect(ToggleJumpButtonVisibility)
@@ -1110,9 +988,6 @@ AntiWaterToggle.MouseButton1Click:Connect(ToggleAntiWaterDamage)
 LocalPlayer.CharacterAdded:Connect(function(newCharacter)
     Character = newCharacter
     Humanoid = Character:WaitForChild("Humanoid")
-    
-    -- Store new health values
-    LastHealth = Humanoid.Health
     
     -- Reapply settings
     ApplyWalkspeed()
@@ -1152,6 +1027,6 @@ ApplyJumpPower()
 -- Notification
 game.StarterGui:SetCore("SendNotification", {
     Title = "Enhanced Game Controller",
-    Text = "Loaded! Press X or Hide UI to minimize. Tab system: Speed/Jump & Protection features.",
+    Text = "Loaded successfully! Use tabs to switch between Speed/Jump and Protection features.",
     Duration = 5
 })
